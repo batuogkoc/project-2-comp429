@@ -244,11 +244,95 @@ void MarchCube(
     }
 }
 
+// __host__ __device__ void coords_to_idx(int ix, int iy, int iz, int NumX, int NumY, int NumZ){
+//     return (NumZ * NumY * ix + NumZ * iy + iz);
+// }
+
+// __host__ __device__ void idx_to_coords(int idx, float3* coords, int NumX, int NumY, int NumZ){
+//     int iz = idx % NumZ;
+//     int iy = (idx/NumZ)%NumY;
+//     int ix = idx / (NumZ * NumY);
+// }
+
 ///////////////////////////////////////////////////////////////////
 //                             PART 1&2                          //
 //         Doing PART 2 means you get full points for 1&2        //
 //                You can add additional parameters              //
 ///////////////////////////////////////////////////////////////////
+__global__ void MarchCubeCUDANaive(
+    Rect3 *domainP,
+    float3 *cubeSizeP,
+    float twist,
+    float isoLevel,
+    float3 *meshVertices,
+    float3 *meshNormals)
+{
+    // printf("test\n");
+    int NumX = static_cast<int>(ceil(domainP->size.x / cubeSizeP->x));
+    int NumY = static_cast<int>(ceil(domainP->size.y / cubeSizeP->y));
+    int NumZ = static_cast<int>(ceil(domainP->size.z / cubeSizeP->z));
+
+    float3 *intersect = new float3[12];
+
+    int globalThreadIdx = blockDim.x * blockIdx.x + threadIdx.x;
+    int globalThreadNum = gridDim.x * blockDim.x;
+
+    int threadWorkSize = static_cast<int>(ceil(((float)(NumX * NumY * NumZ)) / ((float)globalThreadNum)));
+    for (int idx = blockDim.x * blockIdx.x * threadWorkSize + threadIdx.x; idx < (blockDim.x * (blockIdx.x + 1) * threadWorkSize); idx += threadWorkSize)
+    {
+
+        int iz = idx % NumZ;
+        int iy = (idx / NumZ) % NumY;
+        int ix = idx / (NumZ * NumY);
+        // printf("idx: %d x: %d y: %d x: %d\n", idx, ix, iy, iz);
+
+        float x = domainP->min.x + ix * cubeSizeP->x;
+        float y = domainP->min.y + iy * cubeSizeP->y;
+        float z = domainP->min.z + iz * cubeSizeP->z;
+
+        float3 min = make_float3(x, y, z);
+
+        // create a cube made of 8 vertices
+        float3 pos[8];
+        float sdf[8];
+
+        Rect3 space = {min, *cubeSizeP};
+
+        float mx = space.min.x;
+        float my = space.min.y;
+        float mz = space.min.z;
+
+        float sx = space.size.x;
+        float sy = space.size.y;
+        float sz = space.size.z;
+
+        pos[0] = space.min;
+        pos[1] = make_float3(mx + sx, my, mz);
+        pos[2] = make_float3(mx + sx, my, mz + sz);
+        pos[3] = make_float3(mx, my, mz + sz);
+        pos[4] = make_float3(mx, my + sy, mz);
+        pos[5] = make_float3(mx + sx, my + sy, mz);
+        pos[6] = make_float3(mx + sx, my + sy, mz + sz);
+        pos[7] = make_float3(mx, my + sy, mz + sz);
+
+        // fill in the vertices of the cube
+        for (int i = 0; i < 8; ++i)
+        {
+            float sd = opTwist(pos[i], twist);
+            if (sd == 0)
+                sd += 1e-6;
+            sdf[i] = sd;
+        }
+
+        // map the vertices under the isosurface to intersecting edges
+        int signConfig = Intersect(pos, sdf, intersect, isoLevel);
+
+        // now create and store the triangle data
+        int offset = (NumZ * NumY * ix + NumZ * iy + iz) * 16;
+        Triangulate(twist, meshVertices + offset, meshNormals + offset, signConfig, intersect);
+    }
+}
+
 __global__ void MarchCubeCUDA(
     Rect3 *domainP,
     float3 *cubeSizeP,
@@ -257,7 +341,70 @@ __global__ void MarchCubeCUDA(
     float3 *meshVertices,
     float3 *meshNormals)
 {
-    
+    // printf("test\n");
+    int NumX = static_cast<int>(ceil(domainP->size.x / cubeSizeP->x));
+    int NumY = static_cast<int>(ceil(domainP->size.y / cubeSizeP->y));
+    int NumZ = static_cast<int>(ceil(domainP->size.z / cubeSizeP->z));
+
+    float3 *intersect = new float3[12];
+
+    int globalThreadIdx = blockDim.x * blockIdx.x + threadIdx.x;
+    int globalThreadNum = gridDim.x * blockDim.x;
+
+    int threadWorkSize = static_cast<int>(ceil(((float)(NumX * NumY * NumZ)) / ((float)globalThreadNum)));
+    for (int idx = blockDim.x * blockIdx.x * threadWorkSize + threadIdx.x; idx < (blockDim.x * (blockIdx.x + 1) * threadWorkSize); idx += threadWorkSize)
+    {
+
+        int iz = idx % NumZ;
+        int iy = (idx / NumZ) % NumY;
+        int ix = idx / (NumZ * NumY);
+        // printf("idx: %d x: %d y: %d x: %d\n", idx, ix, iy, iz);
+
+        float x = domainP->min.x + ix * cubeSizeP->x;
+        float y = domainP->min.y + iy * cubeSizeP->y;
+        float z = domainP->min.z + iz * cubeSizeP->z;
+
+        float3 min = make_float3(x, y, z);
+
+        // create a cube made of 8 vertices
+        float3 pos[8];
+        float sdf[8];
+
+        Rect3 space = {min, *cubeSizeP};
+
+        float mx = space.min.x;
+        float my = space.min.y;
+        float mz = space.min.z;
+
+        float sx = space.size.x;
+        float sy = space.size.y;
+        float sz = space.size.z;
+
+        pos[0] = space.min;
+        pos[1] = make_float3(mx + sx, my, mz);
+        pos[2] = make_float3(mx + sx, my, mz + sz);
+        pos[3] = make_float3(mx, my, mz + sz);
+        pos[4] = make_float3(mx, my + sy, mz);
+        pos[5] = make_float3(mx + sx, my + sy, mz);
+        pos[6] = make_float3(mx + sx, my + sy, mz + sz);
+        pos[7] = make_float3(mx, my + sy, mz + sz);
+
+        // fill in the vertices of the cube
+        for (int i = 0; i < 8; ++i)
+        {
+            float sd = opTwist(pos[i], twist);
+            if (sd == 0)
+                sd += 1e-6;
+            sdf[i] = sd;
+        }
+
+        // map the vertices under the isosurface to intersecting edges
+        int signConfig = Intersect(pos, sdf, intersect, isoLevel);
+
+        // now create and store the triangle data
+        int offset = (NumZ * NumY * ix + NumZ * iy + iz) * 16;
+        Triangulate(twist, meshVertices + offset, meshNormals + offset, signConfig, intersect);
+    }
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -273,7 +420,6 @@ __global__ void MarchCubeCUDAMultiframe(
     float3 *meshVertices,
     float3 *meshNormals)
 {
-
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -281,7 +427,6 @@ __global__ void MarchCubeCUDAMultiframe(
 //                You can add a function if needed               //
 ///////////////////////////////////////////////////////////////////
 // __global__ void MarchCubeCUDATwoPointers() {}
-
 
 // Correctness test. May not work well for you, so test the generated shapes instead
 void TestCorrectness(int frameSize, float3 *result, float3 *truth, int frame)
@@ -297,7 +442,8 @@ void TestCorrectness(int frameSize, float3 *result, float3 *truth, int frame)
             printf("Vertex under the index %d/%d: \ngot: [%f,%f,%f] \nexpected [%f,%f,%f]\n",
                    i, frameSize, result[i].x, result[i].y, result[i].z, truth[i].x, truth[i].y, truth[i].z);
             wrong++;
-            if (wrong > frameSize / 20)
+            // if (wrong > frameSize / 20)
+            if (wrong > 10)
             {
                 printf("Test for frame %d failed \n", frame);
                 return;
@@ -372,7 +518,7 @@ int main(int argc, char *argv[])
     float maxTwist = 5.0;
     float twist = 0.0;
     Rect3 domain;
-    
+
     // the domain is from -1 to 1 in each axis
     domain.min = make_float3(-1.0, -1.0, -1.0);
     domain.size = make_float3(2.0, 2.0, 2.0);
@@ -380,7 +526,7 @@ int main(int argc, char *argv[])
     float3 cubeSize = domain.size * (1.0 / cubesRes);
     int frame;
 
-    // set the number of cubes in each axis 
+    // set the number of cubes in each axis
     int NumX = static_cast<int>(ceil(domain.size.x / cubeSize.x));
     int NumY = static_cast<int>(ceil(domain.size.y / cubeSize.y));
     int NumZ = static_cast<int>(ceil(domain.size.z / cubeSize.z));
@@ -390,7 +536,24 @@ int main(int argc, char *argv[])
     ///////////////////////////////////////////////////////////////////
     //         Allocate required memory and buffers here             //
     ///////////////////////////////////////////////////////////////////
-    
+
+    float3 *meshVertices_d;
+    checkCudaErrors(cudaMalloc(&meshVertices_d, frameSize * frameNum * sizeof(float3)));
+    float3 *meshNormals_d;
+    checkCudaErrors(cudaMalloc(&meshNormals_d, frameSize * frameNum * sizeof(float3)));
+
+    Rect3 *domain_d;
+    float3 *cubeSize_d;
+
+    checkCudaErrors(cudaMalloc(&domain_d, sizeof(Rect3)));
+    checkCudaErrors(cudaMalloc(&cubeSize_d, sizeof(float3)));
+
+    checkCudaErrors(cudaMemcpy(domain_d, &domain, sizeof(Rect3), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(cubeSize_d, &cubeSize, sizeof(float3), cudaMemcpyHostToDevice));
+
+    // Rect3 domain_test;
+    // checkCudaErrors(cudaMemcpy(&domain_test, domain_d, sizeof(Rect3), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaDeviceSynchronize());
     ///////////////////////////////////////////////////////////////////
     //         Do not change the memory allocated for testing        //
     ///////////////////////////////////////////////////////////////////
@@ -424,7 +587,7 @@ int main(int argc, char *argv[])
                 string filename = "cpu_link_f" + to_string(frame) + "_n" + to_string(cubesRes) + ".obj";
                 WriteObjFile(frameSize, meshVertices_test + offset, meshNormals_test + offset, filename);
             }
-            
+
             offset += frameSize;
             twist += 1.0 / float(frameNum) * maxTwist;
         }
@@ -444,13 +607,14 @@ int main(int argc, char *argv[])
     ///////////////////////////////////////////////////////////////////
     if (part == -1 || part == 1 || part == 2)
     {
+        int offset = 0;
         for (frame = 0; frame < frameNum; frame++)
         {
             start = high_resolution_clock::now();
             ///////////////////////////////////////////////////////////
             //                   Launch the kernel                   //
             ///////////////////////////////////////////////////////////
-            // MarchCubeCUDA<<<numBlocks, numThreads>>>(domain_d, cubeSize_d, twist, 0, meshVertices_d, meshNormals_d);
+            MarchCubeCUDA<<<numBlocks, numThreads>>>(domain_d, cubeSize_d, twist, 0, meshVertices_d + offset, meshNormals_d + offset);
             checkCudaErrors(cudaDeviceSynchronize());
             end = high_resolution_clock::now();
             kernelTime += (duration<double>(end - start)).count();
@@ -459,6 +623,11 @@ int main(int argc, char *argv[])
             ///////////////////////////////////////////////////////////
             //            Copy the result back to host               //
             ///////////////////////////////////////////////////////////
+            checkCudaErrors(cudaMemcpy(meshVertices_h, meshVertices_d, frameSize * frameNum * sizeof(float3), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpy(meshNormals_h, meshNormals_d, frameSize * frameNum * sizeof(float3), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaDeviceSynchronize());
+            // printf("%f %f %f", meshVertices_h[0].x, meshVertices_h[0].y, meshVertices_h[0].z);
+            // printf("%f %f %f\n", meshVertices_test[0].x, meshVertices_test[0].y, meshVertices_test[0].z);
             end = high_resolution_clock::now();
 
             memcpyTime += (duration<double>(end - start)).count();
@@ -468,13 +637,14 @@ int main(int argc, char *argv[])
             if (saveObj)
             {
                 string filename = "part_1and2_link_f" + to_string(frame) + "_n" + to_string(cubesRes) + ".obj";
-                WriteObjFile(frameSize, meshVertices_h, meshNormals_h, filename);
+                WriteObjFile(frameSize, meshVertices_h + offset, meshNormals_h + offset, filename);
             }
+            offset += frameSize;
 
             // testing
             if (correctTest)
             {
-                TestCorrectness(frameSize, meshVertices_h, meshNormals_h, frame);
+                TestCorrectness(frameSize, meshVertices_h, meshVertices_test, frame);
             }
             end = high_resolution_clock::now();
             extraTime += (duration<double>(end - start)).count();

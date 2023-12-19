@@ -1,0 +1,35 @@
+Setting stack size to unlimited...
+core file size          (blocks, -c) 0
+data seg size           (kbytes, -d) unlimited
+scheduling priority             (-e) 0
+file size               (blocks, -f) unlimited
+pending signals                 (-i) 514840
+max locked memory       (kbytes, -l) unlimited
+max memory size         (kbytes, -m) 8388608
+open files                      (-n) 65535
+pipe size            (512 bytes, -p) 8
+POSIX message queues     (bytes, -q) 819200
+real-time priority              (-r) 0
+stack size              (kbytes, -s) unlimited
+cpu time               (seconds, -t) unlimited
+max user processes              (-u) 4096
+virtual memory          (kbytes, -v) unlimited
+file locks                      (-x) unlimited
+
+Running Job...!
+===============================================================================
+Running compiled binary...
+resolution (n) = 50, number of frames (f) = 1
+blocks (b) = 40, threads (t) = 64starting kernel with 40 blocks 64 threads
+
+0 no error
+
+209 no kernel image is available for execution on the device
+
+Part1&2
+Time taken: 
+Kernels: 0.000104 sec | Performance: 1203.485293 mln_cubes/sec 
+Memcpy:  0.007235 sec 
+Extra:   0.031140 sec 
+Total:   0.038478 sec
+GPU memory usage: used = 105.500000, free = 4957.375000 MB, total = 5062.875000 MB
