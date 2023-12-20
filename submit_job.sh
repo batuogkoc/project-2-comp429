@@ -38,5 +38,5 @@ rm mcubes
 nvcc main.cu -o mcubes -lcudart
 cd out
 
-../mcubes
+../mcubes -o
 

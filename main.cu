@@ -267,20 +267,21 @@ __global__ void MarchCubeCUDA(
     float3 *meshVertices,
     float3 *meshNormals)
 {
-    // printf("test\n");
     int NumX = static_cast<int>(ceil(domainP->size.x / cubeSizeP->x));
     int NumY = static_cast<int>(ceil(domainP->size.y / cubeSizeP->y));
     int NumZ = static_cast<int>(ceil(domainP->size.z / cubeSizeP->z));
 
     float3 *intersect = new float3[12];
 
-    int globalThreadIdx = blockDim.x * blockIdx.x + threadIdx.x;
     int globalThreadNum = gridDim.x * blockDim.x;
+    int totalCubeCount = NumX * NumY * NumZ;
 
-    int threadWorkSize = static_cast<int>(ceil(((float)(NumX * NumY * NumZ)) / ((float)globalThreadNum)));
-    for (int idx = blockDim.x * blockIdx.x * threadWorkSize + threadIdx.x; idx < (blockDim.x * (blockIdx.x + 1) * threadWorkSize); idx += threadWorkSize)
+    for (int idx = blockDim.x * blockIdx.x + threadIdx.x; idx < totalCubeCount; idx += globalThreadNum)
     {
-
+        if (idx >= NumZ * NumY * NumX)
+        {
+            return;
+        }
         int iz = idx % NumZ;
         int iy = (idx / NumZ) % NumY;
         int ix = idx / (NumZ * NumY);
@@ -346,6 +347,69 @@ __global__ void MarchCubeCUDAMultiframe(
     float3 *meshVertices,
     float3 *meshNormals)
 {
+    int NumX = static_cast<int>(ceil(domainP->size.x / cubeSizeP->x));
+    int NumY = static_cast<int>(ceil(domainP->size.y / cubeSizeP->y));
+    int NumZ = static_cast<int>(ceil(domainP->size.z / cubeSizeP->z));
+    float3 *intersect = new float3[12];
+
+    int totalCubeCount = frameNum * NumX * NumY * NumZ;
+    int globalThreadNum = gridDim.x * blockDim.x;
+
+    for (int idx = blockDim.x * blockIdx.x + threadIdx.x; idx < totalCubeCount; idx += globalThreadNum)
+    {
+        // cube idx = (NumZ * NumY * NumX * frameNum + NumZ * NumY * ix + NumZ * iy + iz)
+        int iz = idx % NumZ;
+        int iy = (idx / NumZ) % NumY;
+        int ix = (idx / (NumZ * NumY)) % NumX;
+        int frameIdx = idx / (NumZ * NumY * NumX);
+
+        float twist = frameIdx * (1.0 / float(frameNum) * maxTwist);
+
+        float x = domainP->min.x + ix * cubeSizeP->x;
+        float y = domainP->min.y + iy * cubeSizeP->y;
+        float z = domainP->min.z + iz * cubeSizeP->z;
+
+        float3 min = make_float3(x, y, z);
+
+        // create a cube made of 8 vertices
+        float3 pos[8];
+        float sdf[8];
+
+        Rect3 space = {min, *cubeSizeP};
+
+        float mx = space.min.x;
+        float my = space.min.y;
+        float mz = space.min.z;
+
+        float sx = space.size.x;
+        float sy = space.size.y;
+        float sz = space.size.z;
+
+        pos[0] = space.min;
+        pos[1] = make_float3(mx + sx, my, mz);
+        pos[2] = make_float3(mx + sx, my, mz + sz);
+        pos[3] = make_float3(mx, my, mz + sz);
+        pos[4] = make_float3(mx, my + sy, mz);
+        pos[5] = make_float3(mx + sx, my + sy, mz);
+        pos[6] = make_float3(mx + sx, my + sy, mz + sz);
+        pos[7] = make_float3(mx, my + sy, mz + sz);
+
+        // fill in the vertices of the cube
+        for (int i = 0; i < 8; ++i)
+        {
+            float sd = opTwist(pos[i], twist);
+            if (sd == 0)
+                sd += 1e-6;
+            sdf[i] = sd;
+        }
+
+        // map the vertices under the isosurface to intersecting edges
+        int signConfig = Intersect(pos, sdf, intersect, isoLevel);
+
+        // now create and store the triangle data
+        int offset = (NumZ * NumY * NumX * frameIdx + NumZ * NumY * ix + NumZ * iy + iz) * 16;
+        Triangulate(twist, meshVertices + offset, meshNormals + offset, signConfig, intersect);
+    }
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -467,6 +531,10 @@ int main(int argc, char *argv[])
     checkCudaErrors(cudaMalloc(&meshVertices_d, frameSize * frameNum * sizeof(float3)));
     float3 *meshNormals_d;
     checkCudaErrors(cudaMalloc(&meshNormals_d, frameSize * frameNum * sizeof(float3)));
+    // clear the memory
+    cudaMemset(meshVertices_d, 0, frameSize * frameNum * sizeof(float3));
+    cudaMemset(meshNormals_d, 0, frameSize * frameNum * sizeof(float3));
+    checkCudaErrors(cudaDeviceSynchronize());
 
     Rect3 *domain_d;
     float3 *cubeSize_d;
@@ -477,8 +545,7 @@ int main(int argc, char *argv[])
     checkCudaErrors(cudaMemcpy(domain_d, &domain, sizeof(Rect3), cudaMemcpyHostToDevice));
     checkCudaErrors(cudaMemcpy(cubeSize_d, &cubeSize, sizeof(float3), cudaMemcpyHostToDevice));
 
-    // Rect3 domain_test;
-    // checkCudaErrors(cudaMemcpy(&domain_test, domain_d, sizeof(Rect3), cudaMemcpyDeviceToHost));
+    // sync now so we dont wait for the initialization to finish during the tests.
     checkCudaErrors(cudaDeviceSynchronize());
     ///////////////////////////////////////////////////////////////////
     //         Do not change the memory allocated for testing        //
@@ -540,8 +607,12 @@ int main(int argc, char *argv[])
             ///////////////////////////////////////////////////////////
             //                   Launch the kernel                   //
             ///////////////////////////////////////////////////////////
+            printf("%s\n", cudaGetErrorString(cudaGetLastError()));
+
             MarchCubeCUDA<<<numBlocks, numThreads>>>(domain_d, cubeSize_d, twist, 0, meshVertices_d + offset, meshNormals_d + offset);
             checkCudaErrors(cudaDeviceSynchronize());
+            printf("%s\n", cudaGetErrorString(cudaGetLastError()));
+
             end = high_resolution_clock::now();
             kernelTime += (duration<double>(end - start)).count();
 
@@ -552,8 +623,7 @@ int main(int argc, char *argv[])
             checkCudaErrors(cudaMemcpy(meshVertices_h, meshVertices_d, frameSize * frameNum * sizeof(float3), cudaMemcpyDeviceToHost));
             checkCudaErrors(cudaMemcpy(meshNormals_h, meshNormals_d, frameSize * frameNum * sizeof(float3), cudaMemcpyDeviceToHost));
             checkCudaErrors(cudaDeviceSynchronize());
-            // printf("%f %f %f", meshVertices_h[0].x, meshVertices_h[0].y, meshVertices_h[0].z);
-            // printf("%f %f %f\n", meshVertices_test[0].x, meshVertices_test[0].y, meshVertices_test[0].z);
+
             end = high_resolution_clock::now();
 
             memcpyTime += (duration<double>(end - start)).count();
@@ -593,14 +663,22 @@ int main(int argc, char *argv[])
     ///////////////////////////////////////////////////////////////////
     //                         PART 3 RUN:                           //
     ///////////////////////////////////////////////////////////////////
+    // clear the memory
+    cudaMemset(meshVertices_d, 0, frameSize * frameNum * sizeof(float3));
+    cudaMemset(meshNormals_d, 0, frameSize * frameNum * sizeof(float3));
+    checkCudaErrors(cudaDeviceSynchronize());
     if (part == -1 || part == 3)
     {
         start = high_resolution_clock::now();
         ///////////////////////////////////////////////////////////////
         //                     Launch the kernel                     //
         ///////////////////////////////////////////////////////////////
-        // MarchCubeCUDAMultiframe<<<numBlocks, numThreads>>>(domain_d, cubeSize_d, frameNum, maxTwist, 0, meshVertices_d, meshNormals_d);
+        printf("%s\n", cudaGetErrorString(cudaGetLastError()));
+
+        MarchCubeCUDAMultiframe<<<numBlocks, numThreads>>>(domain_d, cubeSize_d, frameNum, maxTwist, 0, meshVertices_d, meshNormals_d);
         checkCudaErrors(cudaDeviceSynchronize());
+        printf("%s\n", cudaGetErrorString(cudaGetLastError()));
+
         end = high_resolution_clock::now();
         kernelTime = (duration<double>(end - start)).count();
 
@@ -608,6 +686,9 @@ int main(int argc, char *argv[])
         ///////////////////////////////////////////////////////////////
         //              Copy the result back to host                 //
         ///////////////////////////////////////////////////////////////
+        checkCudaErrors(cudaMemcpy(meshVertices_h, meshVertices_d, frameSize * frameNum * sizeof(float3), cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaMemcpy(meshNormals_h, meshNormals_d, frameSize * frameNum * sizeof(float3), cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaDeviceSynchronize());
         end = high_resolution_clock::now();
         memcpyTime = (duration<double>(end - start)).count();
 
@@ -645,6 +726,10 @@ int main(int argc, char *argv[])
     ///////////////////////////////////////////////////////////////////
     //                         PART 4 RUN:                           //
     ///////////////////////////////////////////////////////////////////
+    // clear the memory
+    cudaMemset(meshVertices_d, 0, frameSize * frameNum * sizeof(float3));
+    cudaMemset(meshNormals_d, 0, frameSize * frameNum * sizeof(float3));
+    checkCudaErrors(cudaDeviceSynchronize());
     if (part == -1 || part == 4)
     {
         int offset = 0;
