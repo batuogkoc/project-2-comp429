@@ -691,12 +691,7 @@ int main(int argc, char *argv[])
             // save the object file if told so
             if (saveObj)
             {
-                printf("HELLLO DUDEE\n");
                 string filename = "part_1and2_link_f" + to_string(frame) + "_n" + to_string(cubesRes) + ".obj";
-                for (int i = 0; i < 10; i++)
-                { //  printing few lines for checking
-                    printf("Vertex[%d]: %f, %f, %f\n", i, meshVertices_h[i].x, meshVertices_h[i].y, meshVertices_h[i].z);
-                }
                 WriteObjFile(frameSize, meshVertices_h + offset, meshNormals_h + offset, filename);
             }
             offset += frameSize;
