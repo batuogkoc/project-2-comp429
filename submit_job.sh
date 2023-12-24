@@ -12,7 +12,7 @@
 #SBATCH --partition=shorter
 #SBATCH --qos=shorter
 #SBATCH --time=01:00:00
-#SBATCH --output=run.out
+#SBATCH --output=exp1.out
 #SBATCH --mem-per-cpu=1G
 #SBATCH --gres=gpu:1
 ################################################################################
@@ -33,10 +33,23 @@ echo
 
 echo "Running Job...!"
 echo "==============================================================================="
-echo "Running compiled binary..."
+echo "Compiling..."
 rm mcubes
 nvcc main.cu -o mcubes -lcudart
-cd out
+# cd out
+DIR="exp1"
+echo "Running compiled binary..."
+# for THREAD_NUM in 1 4 16 32 64 128 256 512 1024
+# do
+#     ./mcubes -n 128 -f 1 -b 1 -t ${THREAD_NUM} | tee "${DIR}/mcubes-n128-f1-b1-t${THREAD_NUM}.txt"
+#     ./mcubes -n 32 -f 64 -b 1 -t ${THREAD_NUM} | tee "${DIR}/mcubes-n32-f64-b1-t${THREAD_NUM}.txt"
+#     ./mcubes -n 4 -f 32768 -b 1 -t ${THREAD_NUM} | tee "${DIR}/mcubes-n4-f32768-b1-t${THREAD_NUM}.txt"
+# done
 
-../mcubes
+DIR="exp2"
+for BLOCK_NUM in 1 10 20 40 80 160
+do
+    ./mcubes -n 128 -f 1 -b ${BLOCK_NUM} -t 1024 | tee "${DIR}/mcubes-n128-f1-b${BLOCK_NUM}-t1024.txt"
+    ./mcubes -n 4 -f 32768 -b ${BLOCK_NUM} -t 1024 | tee "${DIR}/mcubes-n4-f32768-b${BLOCK_NUM}-t1024.txt"
+done
 

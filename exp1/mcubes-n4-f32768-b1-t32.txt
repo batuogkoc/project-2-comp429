@@ -1,0 +1,4 @@
+resolution (n) = 4, number of frames (f) = 32768
+blocks (b) = 1, threads (t) = 32
+CPU
+Time taken: 4.593087 | Performance: 0.456589 mln_cubes/sec 

@@ -666,11 +666,11 @@ int main(int argc, char *argv[])
             ///////////////////////////////////////////////////////////
             //                   Launch the kernel                   //
             ///////////////////////////////////////////////////////////
-            printf("%s\n", cudaGetErrorString(cudaGetLastError()));
+            // printf("%s\n", cudaGetErrorString(cudaGetLastError()));
 
             MarchCubeCUDA<<<numBlocks, numThreads>>>(domain_d, cubeSize_d, twist, 0, meshVertices_d + offset, meshNormals_d + offset);
             checkCudaErrors(cudaDeviceSynchronize());
-            printf("%s\n", cudaGetErrorString(cudaGetLastError()));
+            // printf("%s\n", cudaGetErrorString(cudaGetLastError()));
 
             end = high_resolution_clock::now();
             kernelTime += (duration<double>(end - start)).count();
@@ -679,8 +679,8 @@ int main(int argc, char *argv[])
             ///////////////////////////////////////////////////////////
             //            Copy the result back to host               //
             ///////////////////////////////////////////////////////////
-            checkCudaErrors(cudaMemcpy(meshVertices_h, meshVertices_d, frameSize * frameNum * sizeof(float3), cudaMemcpyDeviceToHost));
-            checkCudaErrors(cudaMemcpy(meshNormals_h, meshNormals_d, frameSize * frameNum * sizeof(float3), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpy(meshVertices_h + offset, meshVertices_d + offset, frameSize * sizeof(float3), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpy(meshNormals_h + offset, meshNormals_d + offset, frameSize * sizeof(float3), cudaMemcpyDeviceToHost));
             checkCudaErrors(cudaDeviceSynchronize());
 
             end = high_resolution_clock::now();
@@ -732,11 +732,11 @@ int main(int argc, char *argv[])
         ///////////////////////////////////////////////////////////////
         //                     Launch the kernel                     //
         ///////////////////////////////////////////////////////////////
-        printf("%s\n", cudaGetErrorString(cudaGetLastError()));
+        // printf("%s\n", cudaGetErrorString(cudaGetLastError()));
 
         MarchCubeCUDAMultiframe<<<numBlocks, numThreads>>>(domain_d, cubeSize_d, frameNum, maxTwist, 0, meshVertices_d, meshNormals_d);
         checkCudaErrors(cudaDeviceSynchronize());
-        printf("%s\n", cudaGetErrorString(cudaGetLastError()));
+        // printf("%s\n", cudaGetErrorString(cudaGetLastError()));
 
         end = high_resolution_clock::now();
         kernelTime = (duration<double>(end - start)).count();

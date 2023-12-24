@@ -1,0 +1,25 @@
+resolution (n) = 32, number of frames (f) = 64
+blocks (b) = 1, threads (t) = 16
+CPU
+Time taken: 2.465907 | Performance: 0.850459 mln_cubes/sec 
+
+Part1&2
+Time taken: 
+Kernels: 1.535876 sec | Performance: 1.365444 mln_cubes/sec 
+Memcpy:  0.062311 sec 
+Extra:   0.000004 sec 
+Total:   1.598191 sec
+GPU memory usage: used = 1182.000000, free = 31319.125000 MB, total = 32501.125000 MB
+
+Part3
+Time taken: 
+Kernels: 1.502679 sec | Performance: 1.395609 mln_cubes/sec 
+Memcpy:  0.061201 sec 
+Extra:   0.000000 sec 
+Total:   1.563880 sec
+GPU memory usage: used = 1182.000000, free = 31319.125000 MB, total = 32501.125000 MB
+
+Part4
+Time taken: 
+Total: 1.557263 sec
+GPU memory usage: used = 438.000000, free = 32063.125000 MB, total = 32501.125000 MB
