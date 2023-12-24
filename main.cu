@@ -308,13 +308,13 @@ __global__ void MarchCubeCUDA(
         float sz = space.size.z;
 
         pos[0] = space.min;
-        pos[1] = make_float3(mx + sx, my, mz);
-        pos[2] = make_float3(mx + sx, my, mz + sz);
-        pos[3] = make_float3(mx, my, mz + sz);
-        pos[4] = make_float3(mx, my + sy, mz);
-        pos[5] = make_float3(mx + sx, my + sy, mz);
-        pos[6] = make_float3(mx + sx, my + sy, mz + sz);
-        pos[7] = make_float3(mx, my + sy, mz + sz);
+        pos[1] = make_float3(mx + sx, my, mz);           // x* y z
+        pos[2] = make_float3(mx + sx, my, mz + sz);      // x* y z*
+        pos[3] = make_float3(mx, my, mz + sz);           // x y z*
+        pos[4] = make_float3(mx, my + sy, mz);           // x y* z
+        pos[5] = make_float3(mx + sx, my + sy, mz);      // x* y* z
+        pos[6] = make_float3(mx + sx, my + sy, mz + sz); // x* y* z*
+        pos[7] = make_float3(mx, my + sy, mz + sz);      // x y* z*
 
         // fill in the vertices of the cube
         for (int i = 0; i < 8; ++i)
@@ -416,7 +416,66 @@ __global__ void MarchCubeCUDAMultiframe(
 //                             PART 4                            //
 //                You can add a function if needed               //
 ///////////////////////////////////////////////////////////////////
-// __global__ void MarchCubeCUDATwoPointers() {}
+__global__ void MarchCubeCUDATwoPointers(
+    Rect3 *domainP,
+    float3 *cubeSizeP,
+    float maxTwist,
+    float isoLevel,
+    float3 *meshVerticesBuffer1,
+    float3 *meshNormalsBuffer1,
+    float3 *meshVerticesBuffer2,
+    float3 *meshNormalsBuffer2,
+    int totalFrames,
+    int currentFrame)
+{
+    int NumX = static_cast<int>(ceil(domainP->size.x / cubeSizeP->x));
+    int NumY = static_cast<int>(ceil(domainP->size.y / cubeSizeP->y));
+    int NumZ = static_cast<int>(ceil(domainP->size.z / cubeSizeP->z));
+    int totalCubeCount = NumX * NumY * NumZ;
+    int globalThreadNum = gridDim.x * blockDim.x;
+
+    // Determine which set of buffers to use for this frame
+    float3 *currentVertices = (currentFrame % 2 == 0) ? meshVerticesBuffer1 : meshVerticesBuffer2;
+    float3 *currentNormals = (currentFrame % 2 == 0) ? meshNormalsBuffer1 : meshNormalsBuffer2;
+
+    for (int idx = blockDim.x * blockIdx.x + threadIdx.x; idx < totalCubeCount; idx += globalThreadNum)
+    {
+        int iz = idx % NumZ;
+        int iy = (idx / NumZ) % NumY;
+        int ix = idx / (NumZ * NumY);
+
+        float x = domainP->min.x + ix * cubeSizeP->x;
+        float y = domainP->min.y + iy * cubeSizeP->y;
+        float z = domainP->min.z + iz * cubeSizeP->z;
+
+        // Calculating the position of each vertex of the cube
+        float3 pos[8];
+        pos[0] = make_float3(x, y, z);
+        pos[1] = make_float3(x + cubeSizeP->x, y, z);
+        pos[2] = make_float3(x + cubeSizeP->x, y, z + cubeSizeP->z);
+        pos[3] = make_float3(x, y, z + cubeSizeP->z);
+        pos[4] = make_float3(x, y + cubeSizeP->y, z);
+        pos[5] = make_float3(x + cubeSizeP->x, y + cubeSizeP->y, z);
+        pos[6] = make_float3(x + cubeSizeP->x, y + cubeSizeP->y, z + cubeSizeP->z);
+        pos[7] = make_float3(x, y + cubeSizeP->y, z + cubeSizeP->z);
+
+        // Calculate the twist for each vertex
+        float currentTwist = (maxTwist * currentFrame) / totalFrames;
+        float sdf[8];
+        for (int i = 0; i < 8; ++i)
+        {
+            sdf[i] = opTwist(pos[i], currentTwist);
+            if (sdf[i] == 0)
+                sdf[i] += 1e-6; // Avoiding division by zero in later calculations
+        }
+
+        // Calculate intersection points and create triangles
+        float3 intersect[12];
+        int signConfig = Intersect(pos, sdf, intersect, isoLevel);
+        int offset = (NumZ * NumY * ix + NumZ * iy + iz) * 16;
+        Triangulate(currentTwist, currentVertices + offset, currentNormals + offset, signConfig, intersect);
+    }
+}
 
 // Correctness test. May not work well for you, so test the generated shapes instead
 void TestCorrectness(int frameSize, float3 *result, float3 *truth, int frame)
@@ -632,7 +691,12 @@ int main(int argc, char *argv[])
             // save the object file if told so
             if (saveObj)
             {
+                printf("HELLLO DUDEE\n");
                 string filename = "part_1and2_link_f" + to_string(frame) + "_n" + to_string(cubesRes) + ".obj";
+                for (int i = 0; i < 10; i++)
+                { //  printing few lines for checking
+                    printf("Vertex[%d]: %f, %f, %f\n", i, meshVertices_h[i].x, meshVertices_h[i].y, meshVertices_h[i].z);
+                }
                 WriteObjFile(frameSize, meshVertices_h + offset, meshNormals_h + offset, filename);
             }
             offset += frameSize;
@@ -722,48 +786,91 @@ int main(int argc, char *argv[])
     }
 
     ///////////////////////////////////////////////////////////////////
-    //   Re-allocate some of the memory and buffers here if needed   //
-    ///////////////////////////////////////////////////////////////////
     //                         PART 4 RUN:                           //
     ///////////////////////////////////////////////////////////////////
-    // clear the memory
-    cudaMemset(meshVertices_d, 0, frameSize * frameNum * sizeof(float3));
-    cudaMemset(meshNormals_d, 0, frameSize * frameNum * sizeof(float3));
-    checkCudaErrors(cudaDeviceSynchronize());
+
+    float3 *meshVertices_d1, *meshNormals_d1;
+    float3 *meshVertices_d2, *meshNormals_d2;
+
+    checkCudaErrors(cudaMalloc(&meshVertices_d1, frameSize * sizeof(float3))); // not frameNum * frameSize
+    checkCudaErrors(cudaMalloc(&meshNormals_d1, frameSize * sizeof(float3)));
+    checkCudaErrors(cudaMalloc(&meshVertices_d2, frameSize * sizeof(float3)));
+    checkCudaErrors(cudaMalloc(&meshNormals_d2, frameSize * sizeof(float3)));
+
+    cudaStream_t computeStream, transferStream;
+    cudaStreamCreate(&computeStream);
+    cudaStreamCreate(&transferStream);
+    cudaEvent_t computeDone, transferDone;
+    cudaEventCreate(&computeDone);
+    cudaEventCreate(&transferDone);
+
     if (part == -1 || part == 4)
     {
         int offset = 0;
         start = high_resolution_clock::now();
-        for (frame = 0; frame < frameNum; frame++)
+
+        for (int frame = 0; frame < frameNum; ++frame)
         {
-            ///////////////////////////////////////////////////////////
-            //                   Launch the kernel                   //
-            ///////////////////////////////////////////////////////////
-            //         Copy the result back to host (async)          //
-            ///////////////////////////////////////////////////////////
+            float3 *currentMeshVertices_d = (frame % 2 == 0) ? meshVertices_d1 : meshVertices_d2;
+            float3 *currentMeshNormals_d = (frame % 2 == 0) ? meshNormals_d1 : meshNormals_d2;
+            float3 *previousMeshVertices_d = (frame % 2 == 0) ? meshVertices_d2 : meshVertices_d1;
+            float3 *previousMeshNormals_d = (frame % 2 == 0) ? meshNormals_d2 : meshNormals_d1;
 
-            // save the object file if told so
-            if (saveObj)
-            {
-                checkCudaErrors(cudaDeviceSynchronize());
-                string filename = "part_4_link_f" + to_string(frame) + "_n" + to_string(cubesRes) + ".obj";
-                WriteObjFile(frameSize, meshVertices_h + offset, meshNormals_h + offset, filename);
-            }
+            // buffer cleaning (otherwise weird thing are happenning, believe me)
+            checkCudaErrors(cudaMemsetAsync(currentMeshVertices_d, 0, frameSize * sizeof(float3), computeStream));
+            checkCudaErrors(cudaMemsetAsync(currentMeshNormals_d, 0, frameSize * sizeof(float3), computeStream));
 
-            // testing
-            if (correctTest)
+            MarchCubeCUDATwoPointers<<<numBlocks, numThreads, 0, computeStream>>>(
+                domain_d, cubeSize_d, maxTwist, 0,
+                currentMeshVertices_d, currentMeshNormals_d, currentMeshVertices_d, currentMeshNormals_d,
+                frameNum, frame);
+
+            cudaEventRecord(computeDone, computeStream);
+
+            if (frame > 0)
             {
-                checkCudaErrors(cudaDeviceSynchronize());
-                TestCorrectness(frameSize, meshVertices_h + offset, meshNormals_h + offset, frame);
+                cudaEventSynchronize(computeDone);
+                checkCudaErrors(cudaMemcpyAsync(
+                    meshVertices_h + offset - frameSize, previousMeshVertices_d,
+                    frameSize * sizeof(float3), cudaMemcpyDeviceToHost, transferStream));
+                checkCudaErrors(cudaMemcpyAsync(
+                    meshNormals_h + offset - frameSize, previousMeshNormals_d,
+                    frameSize * sizeof(float3), cudaMemcpyDeviceToHost, transferStream));
+                cudaEventRecord(transferDone, transferStream);
+                cudaEventSynchronize(transferDone);
+                // safety guarenteed (safety is important)
+                if (saveObj)
+                {
+                    string filename = "part_4_link_f" + to_string(frame - 1) + "_n" + to_string(cubesRes) + ".obj";
+                    WriteObjFile(frameSize, meshVertices_h + offset - frameSize, meshNormals_h + offset - frameSize, filename);
+                }
             }
 
             offset += frameSize;
-            twist += 1.0 / float(frameNum) * maxTwist;
         }
+
+        // special treatment for final frame (otherwise the implementation blows up)
+        if (saveObj)
+        {
+            cudaEventSynchronize(computeDone);
+            float3 *lastMeshVertices_d = (frameNum % 2 == 0) ? meshVertices_d2 : meshVertices_d1;
+            float3 *lastMeshNormals_d = (frameNum % 2 == 0) ? meshNormals_d2 : meshNormals_d1;
+            checkCudaErrors(cudaMemcpyAsync(
+                meshVertices_h + offset - frameSize, lastMeshVertices_d,
+                frameSize * sizeof(float3), cudaMemcpyDeviceToHost, transferStream));
+            checkCudaErrors(cudaMemcpyAsync(
+                meshNormals_h + offset - frameSize, lastMeshNormals_d,
+                frameSize * sizeof(float3), cudaMemcpyDeviceToHost, transferStream));
+            cudaEventRecord(transferDone, transferStream);
+            cudaEventSynchronize(transferDone);
+
+            string filename = "part_4_link_f" + to_string(frameNum - 1) + "_n" + to_string(cubesRes) + ".obj";
+            WriteObjFile(frameSize, meshVertices_h + offset - frameSize, meshNormals_h + offset - frameSize, filename);
+        }
+
         cudaDeviceSynchronize();
         end = high_resolution_clock::now();
-        totalTime = (duration<double>(end - start)).count();
-
+        totalTime = std::chrono::duration<double>(end - start).count();
         printf("\nPart4\nTime taken: \nTotal: %f sec\n", totalTime);
         showMemUsage();
     }
