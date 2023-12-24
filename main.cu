@@ -784,6 +784,9 @@ int main(int argc, char *argv[])
     //                         PART 4 RUN:                           //
     ///////////////////////////////////////////////////////////////////
 
+    checkCudaErrors(cudaFree(meshVertices_d)); // free the memory buffers used in part 1-2 and 3 for more accurate readings.
+    checkCudaErrors(cudaFree(meshNormals_d));
+
     float3 *meshVertices_d1, *meshNormals_d1;
     float3 *meshVertices_d2, *meshNormals_d2;
 
@@ -875,4 +878,11 @@ int main(int argc, char *argv[])
     ///////////////////////////////////////////////////////////////////
     cudaFree(meshVertices_h);
     cudaFree(meshNormals_h);
+
+    cudaFree(meshNormals_d1);
+    cudaFree(meshNormals_d2);
+    cudaFree(meshVertices_d1);
+    cudaFree(meshVertices_d2);
+    checkCudaErrors(cudaFree(domain_d));
+    checkCudaErrors(cudaFree(cubeSize_d));
 }
